@@ -6,12 +6,31 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 const app = express();
-app.get('/health', (_req, res) => res.status(200).send('ok'));
+app.get('/health', (req, res) => res.status(200).send('ok'));
 
 const server = http.createServer(app);
 const io = new Server(server, {
     cors: { origin: '*', methods: ['GET', 'POST'] },
 });
+
+// ── Save attempts ─────────────────────────────────────────────────────────────
+
+async function saveAttempts(gameType: string, gameId: string, scores: { userId: string; score: number; placement?: number }[]) {
+    const frontendUrl = process.env.FRONTEND_URL;
+    const secret = process.env.INTERNAL_API_KEY;
+    if (!frontendUrl || !secret) return;
+    try {
+        const res = await fetch(`${frontendUrl}/api/attempts`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${secret}` },
+            body: JSON.stringify({ gameType, gameId, scores }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        console.log(`[${gameType}] scores saved for ${gameId}`);
+    } catch (err) {
+        console.error(`[${gameType}] saveAttempts error:`, err);
+    }
+}
 
 const PORT = process.env.PORT || 10010;
 
@@ -47,6 +66,9 @@ interface Game {
     allClues: { round: number; clues: Clue[] }[];
     votes: Record<string, string>;
     unmaskVotes: Set<string>;
+    impostorCaught: boolean;
+    impostorGuess: string | null;
+    impostorGuessCorrect: boolean;
 }
 
 // ─── State ────────────────────────────────────────────────────────────────────
@@ -73,6 +95,9 @@ function createGame(players: Player[], totalRounds: number, timePerRound: number
         allClues: [],
         votes: {},
         unmaskVotes: new Set(),
+        impostorCaught: false,
+        impostorGuess: null,
+        impostorGuessCorrect: false,
     };
 }
 
@@ -168,6 +193,7 @@ function startSpeakerTurn(roomId: string) {
     const currentSpeakerId = g.speakingOrder[g.currentSpeakerIndex];
     const currentSpeaker = g.players.find(p => p.id === currentSpeakerId);
     const indexAtStart = g.currentSpeakerIndex;
+    const roundAtStart = g.currentRound;
 
     emitToRoom(roomId, 'impostor:speakerTurn', {
         speakerId: currentSpeakerId,
@@ -179,7 +205,7 @@ function startSpeakerTurn(roomId: string) {
 
     setTimeout(() => {
         const g = games.get(roomId);
-        if (!g || g.roundState !== 'WRITING' || g.currentSpeakerIndex !== indexAtStart) return;
+        if (!g || g.roundState !== 'WRITING' || g.currentSpeakerIndex !== indexAtStart || g.currentRound !== roundAtStart) return;
         // Auto-advance avec indice vide si le joueur n'a pas soumis
         if (!g.cluesThisRound.find(c => c.playerId === currentSpeakerId)) {
             g.cluesThisRound.push({ playerId: currentSpeakerId, playerName: currentSpeaker?.name ?? '', text: '' });
@@ -254,6 +280,7 @@ function resolveVote(roomId: string) {
 
     const eliminated = g.players.find(p => p.id === eliminatedId)!;
     const isImpostor = eliminatedId === g.impostorId;
+    g.impostorCaught = isImpostor;
 
     if (isImpostor) {
         // Joueurs normaux: +2 chacun, +1 si a voté pour l'imposteur
@@ -264,28 +291,20 @@ function resolveVote(roomId: string) {
                 g.scores[p.id] += 1;
             }
         }
-
-        emitToRoom(roomId, 'impostor:eliminated', {
-            eliminatedId,
-            eliminatedName: eliminated.name,
-            isImpostor: true,
-            votes: count,
-        });
-
-        startImpostorGuess(roomId);
     } else {
-        // Innocent éliminé → imposteur gagne
+        // Mauvais vote → bonus imposteur
         g.scores[g.impostorId!] = (g.scores[g.impostorId!] || 0) + 3;
-
-        emitToRoom(roomId, 'impostor:eliminated', {
-            eliminatedId,
-            eliminatedName: eliminated.name,
-            isImpostor: false,
-            votes: count,
-        });
-
-        endGame(roomId, 'impostor');
     }
+
+    emitToRoom(roomId, 'impostor:eliminated', {
+        eliminatedId,
+        eliminatedName: eliminated.name,
+        isImpostor,
+        votes: count,
+    });
+
+    // Dans tous les cas → l'imposteur tente de deviner le mot
+    startImpostorGuess(roomId);
 }
 
 function startImpostorGuess(roomId: string) {
@@ -302,14 +321,17 @@ function startImpostorGuess(roomId: string) {
 
     setTimeout(() => {
         const g = games.get(roomId);
-        if (g?.roundState === 'IMPOSTOR_GUESS') endGame(roomId, 'players');
+        if (g?.roundState === 'IMPOSTOR_GUESS') endGame(roomId);
     }, 30000);
 }
 
-function endGame(roomId: string, winner: 'players' | 'impostor') {
+function endGame(roomId: string) {
     const g = games.get(roomId);
     if (!g) return;
     g.roundState = 'END';
+
+    // Les joueurs gagnent si l'imposteur a été correctement identifié ET n'a pas deviné le mot
+    const winner: 'players' | 'impostor' = (g.impostorCaught && !g.impostorGuessCorrect) ? 'players' : 'impostor';
 
     const impostor = g.players.find(p => p.id === g.impostorId);
 
@@ -320,7 +342,18 @@ function endGame(roomId: string, winner: 'players' | 'impostor') {
         word: g.word,
         scores: g.scores,
         allClues: g.allClues,
+        votes: g.votes,
+        impostorGuess: g.impostorGuess,
+        impostorGuessCorrect: g.impostorGuessCorrect,
+        impostorCaught: g.impostorCaught,
     });
+
+    const sorted = [...g.players].sort((a, b) => (g.scores[b.id] ?? 0) - (g.scores[a.id] ?? 0));
+    saveAttempts('IMPOSTOR', roomId, sorted.map((p, i) => ({
+        userId: p.id,
+        score: g.scores[p.id] ?? 0,
+        placement: i + 1,
+    })));
 
     games.delete(roomId);
 }
@@ -413,9 +446,8 @@ io.on('connection', (socket) => {
         });
 
         if (g.unmaskVotes.size >= threshold) {
-            // Forcer la fin du round en cours et passer au vote
+            // Majorité atteinte → passer directement au vote
             g.currentSpeakerIndex = g.speakingOrder.length;
-            // Ajouter des indices vides pour les joueurs qui n'ont pas encore soumis
             for (const pid of g.speakingOrder) {
                 if (!g.cluesThisRound.find(c => c.playerId === pid)) {
                     const p = g.players.find(pl => pl.id === pid);
@@ -451,7 +483,10 @@ io.on('connection', (socket) => {
         if (!g || g.roundState !== 'IMPOSTOR_GUESS' || !userId) return;
         if (userId !== g.impostorId) return;
 
-        const correct = guess.trim().toLowerCase() === g.word?.toLowerCase();
+        const normalize = (s: string) => s.trim().normalize('NFC').toLowerCase();
+        const correct = normalize(guess) === normalize(g.word ?? '');
+        g.impostorGuess = guess.trim();
+        g.impostorGuessCorrect = correct;
         if (correct) {
             g.scores[g.impostorId] = (g.scores[g.impostorId] || 0) + 2;
         }
@@ -462,7 +497,7 @@ io.on('connection', (socket) => {
             word: g.word,
         });
 
-        setTimeout(() => endGame(lobbyId, 'players'), 2000);
+        setTimeout(() => endGame(lobbyId), 2000);
     });
 
     socket.on('disconnect', () => {
