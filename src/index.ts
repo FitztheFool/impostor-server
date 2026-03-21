@@ -361,7 +361,7 @@ function endGame(roomId: string) {
 // ─── Socket.IO ────────────────────────────────────────────────────────────────
 
 io.on('connection', (socket) => {
-    socket.on('impostor:configure', ({ lobbyId, players, options }) => {
+    socket.on('impostor:configure', ({ lobbyId, players, options }, ack) => {
         const totalRounds = Math.min(Math.max(options?.rounds ?? 1, 1), 5);
         const timePerRound = Math.min(Math.max(options?.timePerRound ?? 60, 30), 120);
         const existing = games.get(lobbyId);
@@ -387,6 +387,7 @@ io.on('connection', (socket) => {
             g.started = true;
             setTimeout(() => startGame(lobbyId), 500);
         }
+        if (typeof ack === 'function') ack();
     });
 
     socket.on('impostor:join', ({ lobbyId, userId, playerName }) => {
