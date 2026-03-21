@@ -364,15 +364,29 @@ io.on('connection', (socket) => {
     socket.on('impostor:configure', ({ lobbyId, players, options }) => {
         const totalRounds = Math.min(Math.max(options?.rounds ?? 1, 1), 5);
         const timePerRound = Math.min(Math.max(options?.timePerRound ?? 60, 30), 120);
+        const existing = games.get(lobbyId);
         const gamePlayers: Player[] = players.map((p: any) => ({
             id: p.userId,
             name: p.username,
-            socketId: null,
+            socketId: existing?.players.find((ep: Player) => ep.id === p.userId)?.socketId ?? null,
             eliminated: false,
         }));
-        const g = createGame(gamePlayers, totalRounds, timePerRound);
-        g.expectedCount = players.length;
-        games.set(lobbyId, g);
+        if (existing) {
+            existing.players = gamePlayers;
+            existing.expectedCount = players.length;
+            existing.totalRounds = totalRounds;
+            existing.timePerRound = timePerRound;
+        } else {
+            const g = createGame(gamePlayers, totalRounds, timePerRound);
+            g.expectedCount = players.length;
+            games.set(lobbyId, g);
+        }
+        const g = games.get(lobbyId)!;
+        const connected = g.players.filter((p: Player) => p.socketId !== null).length;
+        if (!g.started && g.expectedCount > 0 && connected >= g.expectedCount) {
+            g.started = true;
+            setTimeout(() => startGame(lobbyId), 500);
+        }
     });
 
     socket.on('impostor:join', ({ lobbyId, userId, playerName }) => {
