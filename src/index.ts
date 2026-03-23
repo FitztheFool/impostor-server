@@ -283,17 +283,23 @@ function resolveVote(roomId: string) {
     g.impostorCaught = isImpostor;
 
     if (isImpostor) {
-        // Joueurs normaux: +2 chacun, +1 si a voté pour l'imposteur
+        // +1 pour tous les joueurs normaux (équipe) + +2 pour ceux qui ont voté pour l'imposteur
         for (const p of g.players) {
             if (p.id === g.impostorId) continue;
-            g.scores[p.id] = (g.scores[p.id] || 0) + 2;
+            g.scores[p.id] = (g.scores[p.id] || 0) + 1;
             if (g.votes[p.id] === eliminatedId) {
-                g.scores[p.id] += 1;
+                g.scores[p.id] += 2;
             }
         }
     } else {
-        // Mauvais vote → bonus imposteur
+        // Mauvais vote → +3 pour l'imposteur + +1 pour ceux qui avaient voté pour l'imposteur
         g.scores[g.impostorId!] = (g.scores[g.impostorId!] || 0) + 3;
+        for (const p of g.players) {
+            if (p.id === g.impostorId) continue;
+            if (g.votes[p.id] === g.impostorId) {
+                g.scores[p.id] = (g.scores[p.id] || 0) + 1;
+            }
+        }
     }
 
     emitToRoom(roomId, 'impostor:eliminated', {
