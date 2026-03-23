@@ -396,23 +396,84 @@ io.on('connection', (socket) => {
         socket.data = { lobbyId, userId };
 
         if (!games.has(lobbyId)) {
-            const g = createGame([], 1, 60);
-            g.expectedCount = 0;
-            games.set(lobbyId, g);
+            socket.emit('notFound');
+            return;
         }
 
         const g = games.get(lobbyId)!;
         const existing = g.players.find(p => p.id === userId);
         if (existing) {
             existing.socketId = socket.id;
-        } else {
+        } else if (!g.started) {
             g.players.push({ id: userId, name: playerName, socketId: socket.id, eliminated: false });
             g.scores[userId] = 0;
         }
+        // Si g.started && !existing : spectateur — rejoint la room mais n'est pas joueur
 
         emitToRoom(lobbyId, 'impostor:players', {
             players: g.players.map(p => ({ id: p.id, name: p.name })),
         });
+
+        // Reconnexion en cours de partie — renvoyer l'état courant
+        if (existing && g.started && g.roundState !== 'WAITING') {
+            const role = userId === g.impostorId ? 'impostor' : 'player';
+            socket.emit('impostor:gameStart', {
+                role,
+                word: role === 'impostor' ? null : g.word,
+                players: g.players.map(p => ({ id: p.id, name: p.name })),
+                totalRounds: g.totalRounds,
+                speakingOrder: g.speakingOrder,
+            });
+            if (g.roundState === 'WRITING') {
+                socket.emit('impostor:writingPhase', {
+                    round: g.currentRound,
+                    totalRounds: g.totalRounds,
+                    speakingOrder: g.speakingOrder,
+                    players: g.players.map(p => ({ id: p.id, name: p.name })),
+                    timePerRound: g.timePerRound,
+                });
+                for (let i = 0; i < g.cluesThisRound.length; i++) {
+                    const clue = g.cluesThisRound[i];
+                    socket.emit('impostor:clueSubmitted', {
+                        playerId: clue.playerId, playerName: clue.playerName,
+                        text: clue.text, submittedCount: i + 1, total: g.speakingOrder.length,
+                    });
+                }
+                const currentSpeakerId = g.speakingOrder[g.currentSpeakerIndex];
+                socket.emit('impostor:speakerTurn', {
+                    speakerId: currentSpeakerId,
+                    speakerName: g.players.find(p => p.id === currentSpeakerId)?.name,
+                    index: g.currentSpeakerIndex,
+                    total: g.speakingOrder.length,
+                    timePerRound: g.timePerRound,
+                });
+            } else if (g.roundState === 'REVEAL') {
+                socket.emit('impostor:cluesRevealed', {
+                    round: g.currentRound, totalRounds: g.totalRounds,
+                    clues: g.cluesThisRound, allClues: g.allClues,
+                    isLastRound: g.currentRound >= g.totalRounds,
+                });
+            } else if (g.roundState === 'VOTING') {
+                socket.emit('impostor:votingPhase', {
+                    players: g.players.map(p => ({ id: p.id, name: p.name })),
+                    round: g.currentRound, timePerRound: g.timePerRound,
+                });
+            } else if (g.roundState === 'IMPOSTOR_GUESS') {
+                socket.emit('impostor:guessPhase', {
+                    impostorId: g.impostorId,
+                    impostorName: g.players.find(p => p.id === g.impostorId)?.name ?? '',
+                });
+            } else if (g.roundState === 'END') {
+                socket.emit('impostor:gameEnd', {
+                    winner: g.impostorCaught ? 'players' : 'impostor',
+                    impostorId: g.impostorId,
+                    impostorName: g.players.find(p => p.id === g.impostorId)?.name ?? '',
+                    word: g.word, scores: g.scores, votes: g.votes,
+                    impostorCaught: g.impostorCaught, impostorGuess: g.impostorGuess,
+                    impostorGuessCorrect: g.impostorGuessCorrect, allClues: g.allClues,
+                });
+            }
+        }
 
         const connected = g.players.filter(p => p.socketId !== null).length;
         if (!g.started && g.expectedCount > 0 && connected >= g.expectedCount) {
@@ -449,6 +510,7 @@ io.on('connection', (socket) => {
         const { userId } = socket.data || {};
         const g = games.get(lobbyId);
         if (!g || g.roundState !== 'WRITING' || !userId) return;
+        if (!g.players.find(p => p.id === userId)) return;
 
         g.unmaskVotes.add(userId);
         const total = g.players.length;
@@ -479,6 +541,7 @@ io.on('connection', (socket) => {
         const { userId } = socket.data || {};
         const g = games.get(lobbyId);
         if (!g || g.roundState !== 'VOTING' || !userId) return;
+        if (!g.players.find(p => p.id === userId)) return;
         g.votes[userId] = targetId;
 
         emitToRoom(lobbyId, 'impostor:voteUpdate', {
