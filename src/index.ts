@@ -15,7 +15,7 @@ const io = new Server(server, {
 
 // ── Save attempts ─────────────────────────────────────────────────────────────
 
-async function saveAttempts(gameType: string, gameId: string, scores: { userId: string; score: number; placement?: number }[]) {
+async function saveAttempts(gameType: string, gameId: string, scores: { userId: string; score: number; placement?: number; abandon?: boolean }[]) {
     const frontendUrl = process.env.FRONTEND_URL;
     const secret = process.env.INTERNAL_API_KEY;
     if (!frontendUrl || !secret) return;
@@ -69,6 +69,7 @@ interface Game {
     impostorCaught: boolean;
     impostorGuess: string | null;
     impostorGuessCorrect: boolean;
+    surrenderUserId?: string;
 }
 
 // ─── State ────────────────────────────────────────────────────────────────────
@@ -341,7 +342,7 @@ function endGame(roomId: string) {
 
     const impostor = g.players.find(p => p.id === g.impostorId);
 
-    emitToRoom(roomId, 'impostor:gameEnd', {
+    emitToRoom(roomId, 'impostor:finished', {
         winner,
         impostorId: g.impostorId,
         impostorName: impostor?.name,
@@ -359,6 +360,7 @@ function endGame(roomId: string) {
         userId: p.id,
         score: g.scores[p.id] ?? 0,
         placement: i + 1,
+        abandon: g.surrenderUserId === p.id,
     })));
 
     games.delete(roomId);
@@ -470,7 +472,7 @@ io.on('connection', (socket) => {
                     impostorName: g.players.find(p => p.id === g.impostorId)?.name ?? '',
                 });
             } else if (g.roundState === 'END') {
-                socket.emit('impostor:gameEnd', {
+                socket.emit('impostor:finished', {
                     winner: g.impostorCaught ? 'players' : 'impostor',
                     impostorId: g.impostorId,
                     impostorName: g.players.find(p => p.id === g.impostorId)?.name ?? '',
@@ -582,6 +584,14 @@ io.on('connection', (socket) => {
         });
 
         setTimeout(() => endGame(lobbyId), 2000);
+    });
+
+    socket.on('impostor:surrender', () => {
+        const { lobbyId, userId } = socket.data || {};
+        if (!lobbyId) return;
+        const g = games.get(lobbyId);
+        if (g) g.surrenderUserId = userId;
+        endGame(lobbyId);
     });
 
     socket.on('disconnect', () => {
