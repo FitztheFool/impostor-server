@@ -607,3 +607,8 @@ io.on('connection', (socket) => {
 // ─── Start ────────────────────────────────────────────────────────────────────
 
 server.listen(PORT, () => console.log('[IMPOSTOR] realtime listening on', PORT));
+
+
+const shutdown = () => server.close(() => process.exit(0));
+process.on("SIGTERM", shutdown);
+process.on("SIGINT", shutdown);
