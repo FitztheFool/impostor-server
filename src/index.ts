@@ -1,4 +1,5 @@
 // impostor-server/src/index.ts
+import { randomUUID } from 'crypto';
 import express from 'express';
 import http from 'http';
 import { Server } from 'socket.io';
@@ -131,6 +132,7 @@ async function fetchRandomWord(): Promise<string> {
 async function startGame(roomId: string) {
     const g = games.get(roomId);
     if (!g) return;
+    g.currentGameId = randomUUID();
 
     const word = await fetchRandomWord();
     const impostorIndex = Math.floor(Math.random() * g.players.length);
@@ -356,7 +358,7 @@ function endGame(roomId: string) {
     });
 
     const sorted = [...g.players].sort((a, b) => (g.scores[b.id] ?? 0) - (g.scores[a.id] ?? 0));
-    saveAttempts('IMPOSTOR', roomId, sorted.map((p, i) => ({
+    saveAttempts('IMPOSTOR', g.currentGameId ?? roomId, sorted.map((p, i) => ({
         userId: p.id,
         score: g.scores[p.id] ?? 0,
         placement: i + 1,
