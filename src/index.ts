@@ -4,6 +4,7 @@ import express from 'express';
 import http from 'http';
 import { Server } from 'socket.io';
 import dotenv from 'dotenv';
+import { jwtVerify } from 'jose';
 dotenv.config();
 
 const app = express();
@@ -11,7 +12,7 @@ app.get('/health', (req, res) => res.status(200).send('ok'));
 
 const server = http.createServer(app);
 const io = new Server(server, {
-    cors: { origin: '*', methods: ['GET', 'POST'] },
+    cors: { origin: process.env.FRONTEND_URL, methods: ['GET', 'POST'], credentials: true },
 });
 
 // ── Save attempts ─────────────────────────────────────────────────────────────
@@ -71,6 +72,7 @@ interface Game {
     impostorGuess: string | null;
     impostorGuessCorrect: boolean;
     surrenderUserId?: string;
+    currentGameId: string | null;
 }
 
 // ─── State ────────────────────────────────────────────────────────────────────
@@ -100,6 +102,7 @@ function createGame(players: Player[], totalRounds: number, timePerRound: number
         impostorCaught: false,
         impostorGuess: null,
         impostorGuessCorrect: false,
+        currentGameId: null,
     };
 }
 
@@ -370,6 +373,21 @@ function endGame(roomId: string) {
 
 // ─── Socket.IO ────────────────────────────────────────────────────────────────
 
+const SOCKET_SECRET = new TextEncoder().encode(process.env.INTERNAL_API_KEY!);
+
+io.use(async (socket, next) => {
+    const token = socket.handshake.auth?.token as string | undefined;
+    if (!token) return next(new Error('auth_required'));
+    try {
+        const { payload } = await jwtVerify(token, SOCKET_SECRET);
+        socket.data.userId = payload.sub as string;
+        socket.data.username = payload.username as string;
+        next();
+    } catch {
+        next(new Error('invalid_token'));
+    }
+});
+
 io.on('connection', (socket) => {
     socket.on('impostor:configure', ({ lobbyId, players, options }, ack) => {
         const totalRounds = Math.min(Math.max(options?.rounds ?? 1, 1), 5);
@@ -400,10 +418,11 @@ io.on('connection', (socket) => {
         if (typeof ack === 'function') ack();
     });
 
-    socket.on('impostor:join', ({ lobbyId, userId, playerName }) => {
+    socket.on('impostor:join', ({ lobbyId, playerName }) => {
+        const { userId } = socket.data;
         if (!lobbyId || !userId) return;
         socket.join(lobbyId);
-        socket.data = { lobbyId, userId };
+        socket.data.lobbyId = lobbyId;
 
         if (!games.has(lobbyId)) {
             socket.emit('notFound');
