@@ -2,7 +2,7 @@ import express from 'express';
 import http from 'http';
 import { Server } from 'socket.io';
 import dotenv from 'dotenv';
-import { jwtVerify } from 'jose';
+import { setupSocketAuth, corsConfig } from '@kwizar/shared';
 
 import type { Player } from './types';
 import { games, createGame } from './game';
@@ -20,28 +20,11 @@ const app = express();
 app.get('/health', (_req, res) => res.status(200).send('ok'));
 
 const server = http.createServer(app);
-const io = new Server(server, {
-    cors: { origin: process.env.FRONTEND_URL, methods: ['GET', 'POST'], credentials: true },
-});
+const io = new Server(server, { cors: corsConfig });
 
 initRoom(io);
 
-// ─── Auth middleware ──────────────────────────────────────────────────────────
-
-const SOCKET_SECRET = new TextEncoder().encode(process.env.INTERNAL_API_KEY!);
-
-io.use(async (socket, next) => {
-    const token = socket.handshake.auth?.token as string | undefined;
-    if (!token) return next(new Error('auth_required'));
-    try {
-        const { payload } = await jwtVerify(token, SOCKET_SECRET);
-        socket.data.userId = payload.sub as string;
-        socket.data.username = payload.username as string;
-        next();
-    } catch {
-        next(new Error('invalid_token'));
-    }
-});
+setupSocketAuth(io, new TextEncoder().encode(process.env.INTERNAL_API_KEY!));
 
 // ─── Socket handlers ──────────────────────────────────────────────────────────
 

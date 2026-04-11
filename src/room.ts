@@ -1,6 +1,7 @@
 import { Server } from 'socket.io';
 import type { Clue, Player } from './types';
-import { games, shuffle, fetchRandomWord, saveAttempts } from './game';
+import { games, fetchRandomWord, saveAttempts } from './game';
+import { shuffle } from '@kwizar/shared';
 
 let _io: Server;
 

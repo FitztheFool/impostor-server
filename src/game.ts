@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto';
 import type { Game, Player } from './types';
+import { shuffle } from '@kwizar/shared';
 
 // ─── State ────────────────────────────────────────────────────────────────────
 
@@ -36,14 +37,6 @@ export function createGame(players: Player[], totalRounds: number, timePerRound:
 
 // ─── Utils ────────────────────────────────────────────────────────────────────
 
-export function shuffle<T>(arr: T[]): T[] {
-    const a = [...arr];
-    for (let i = a.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [a[i], a[j]] = [a[j], a[i]];
-    }
-    return a;
-}
 
 export async function fetchRandomWord(): Promise<string> {
     const baseUrl = process.env.FRONTEND_URL ?? 'http://localhost:3000';
