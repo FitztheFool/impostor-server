@@ -32,8 +32,8 @@ io.on('connection', (socket) => {
 
     // ── Configure (called by lobby host) ─────────────────────────────────────
     socket.on('impostor:configure', ({ lobbyId, players, options }, ack) => {
-        const totalRounds = Math.min(Math.max(options?.rounds ?? 1, 1), 5);
-        const timePerRound = Math.min(Math.max(options?.timePerRound ?? 60, 30), 120);
+        const totalRounds = Math.min(Math.max(parseInt(options?.rounds ?? '1', 10) || 1, 1), 5);
+        const timePerRound = Math.min(Math.max(parseInt(options?.timePerRound ?? '60', 10) || 60, 30), 120);
 
         const existing = games.get(lobbyId);
         const gamePlayers: Player[] = players.map((p: any) => ({
@@ -162,13 +162,15 @@ io.on('connection', (socket) => {
         if (g.speakingOrder[g.currentSpeakerIndex] !== userId) return;
         if (g.cluesThisRound.find(c => c.playerId === userId)) return;
 
+        const safeText = typeof text === 'string' ? text.trim().slice(0, 300) : '';
+
         const player = g.players.find(p => p.id === userId);
-        g.cluesThisRound.push({ playerId: userId, playerName: player?.name ?? '', text: text.trim() });
+        g.cluesThisRound.push({ playerId: userId, playerName: player?.name ?? '', text: safeText });
 
         io.to(lobbyId).emit('impostor:clueSubmitted', {
             playerId: userId,
             playerName: player?.name ?? '',
-            text: text.trim(),
+            text: safeText,
             submittedCount: g.cluesThisRound.length,
             total: g.speakingOrder.length,
         });
