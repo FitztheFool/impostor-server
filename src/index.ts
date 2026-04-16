@@ -3,6 +3,8 @@ import http from 'http';
 import { Server } from 'socket.io';
 import dotenv from 'dotenv';
 import { setupSocketAuth, corsConfig } from '@kwizar/shared';
+import { io as socketClient } from 'socket.io-client';
+import { SignJWT } from 'jose';
 
 import type { Player } from './types';
 import { games, createGame } from './game';
@@ -26,12 +28,28 @@ initRoom(io);
 
 setupSocketAuth(io, new TextEncoder().encode(process.env.INTERNAL_API_KEY!));
 
-// ─── Socket handlers ──────────────────────────────────────────────────────────
+// ── Lobby server connection ────────────────────────────────────────────────────
 
-io.on('connection', (socket) => {
+const LOBBY_URL = process.env.LOBBY_SERVER_URL || 'http://localhost:10000';
 
-    // ── Configure (called by lobby host) ─────────────────────────────────────
-    socket.on('impostor:configure', ({ lobbyId, players, options }, ack) => {
+async function makeLobbyToken(): Promise<string> {
+    return new SignJWT({ username: 'impostor-server' })
+        .setProtectedHeader({ alg: 'HS256' })
+        .setSubject('impostor-server')
+        .sign(new TextEncoder().encode(process.env.INTERNAL_API_KEY!));
+}
+
+const lobbySocket = socketClient(LOBBY_URL, {
+    auth: (cb: (d: object) => void) => makeLobbyToken().then(token => cb({ token, gameType: 'impostor' })),
+    reconnection: true,
+    reconnectionDelay: 5_000,
+    reconnectionDelayMax: 30_000,
+});
+lobbySocket.on('connect', () => console.log('[LOBBY] connected'));
+lobbySocket.on('disconnect', (reason: string) => console.log('[LOBBY] disconnected:', reason));
+lobbySocket.on('connect_error', (err: any) => console.log('[LOBBY] connect_error:', err.message));
+
+lobbySocket.on('impostor:configure', ({ lobbyId, players, options }: any, ack?: () => void) => {
         const totalRounds = Math.min(Math.max(parseInt(options?.rounds ?? '1', 10) || 1, 1), 5);
         const timePerRound = Math.min(Math.max(parseInt(options?.timePerRound ?? '60', 10) || 60, 30), 120);
 
@@ -62,7 +80,11 @@ io.on('connection', (socket) => {
         }
 
         if (typeof ack === 'function') ack();
-    });
+});
+
+// ─── Socket handlers ──────────────────────────────────────────────────────────
+
+io.on('connection', (socket) => {
 
     // ── Join / reconnect ──────────────────────────────────────────────────────
     socket.on('impostor:join', ({ lobbyId, playerName }) => {
