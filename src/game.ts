@@ -32,6 +32,7 @@ export function createGame(players: Player[], totalRounds: number, timePerRound:
         impostorGuess: null,
         impostorGuessCorrect: false,
         currentGameId: null,
+        disconnectTimers: new Map(),
     };
 }
 

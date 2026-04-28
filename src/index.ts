@@ -9,7 +9,7 @@ import { games, createGame } from './game';
 import {
     initRoom, startGame,
     startWritingPhase, startVoting, resolveVote,
-    startImpostorGuess, endGame,
+    startSpeakerTurn, startImpostorGuess, endGame,
 } from './room';
 
 dotenv.config();
@@ -79,6 +79,12 @@ io.on('connection', (socket) => {
 
         if (existing) {
             existing.socketId = socket.id;
+            const t = g.disconnectTimers.get(userId);
+            if (t) {
+                clearTimeout(t);
+                g.disconnectTimers.delete(userId);
+                io.to(lobbyId).emit('impostor:playerReconnected', { userId });
+            }
         } else if (!g.started) {
             g.players.push({ id: userId, name: playerName, socketId: socket.id, eliminated: false });
             g.scores[userId] = 0;
@@ -177,8 +183,6 @@ io.on('connection', (socket) => {
         });
 
         g.currentSpeakerIndex++;
-        // imported from room.ts — re-exported for internal use
-        const { startSpeakerTurn } = require('./room');
         startSpeakerTurn(lobbyId);
     });
 
@@ -260,7 +264,38 @@ io.on('connection', (socket) => {
         const g = games.get(lobbyId);
         if (!g) return;
         const p = g.players.find(p => p.id === userId);
-        if (p) p.socketId = null;
+        if (!p) return;
+
+        p.socketId = null;
+        if (!g.started) return;
+
+        io.to(lobbyId).emit('impostor:inactivityWarning', { userId, username: p.name, secondsLeft: 60 });
+        const existing = g.disconnectTimers.get(userId);
+        if (existing) clearTimeout(existing);
+        const timer = setTimeout(() => {
+            g.disconnectTimers.delete(userId);
+            io.to(lobbyId).emit('impostor:playerKicked', { userId, username: p.name, reason: 'disconnect' });
+
+            // Unblock WRITING phase if it's this player's speaker turn
+            if (g.roundState === 'WRITING' && g.speakingOrder[g.currentSpeakerIndex] === userId) {
+                if (!g.cluesThisRound.find(c => c.playerId === userId)) {
+                    g.cluesThisRound.push({ playerId: userId, playerName: p.name, text: '' });
+                    g.currentSpeakerIndex++;
+                    startSpeakerTurn(lobbyId);
+                }
+            }
+
+            // Unblock VOTING phase if this player hasn't voted yet
+            if (g.roundState === 'VOTING' && !(userId in g.votes)) {
+                g.votes[userId] = '';
+                io.to(lobbyId).emit('impostor:voteUpdate', {
+                    votedCount: Object.keys(g.votes).length,
+                    total: g.players.length,
+                });
+                if (Object.keys(g.votes).length >= g.players.length) resolveVote(lobbyId);
+            }
+        }, 60_000);
+        g.disconnectTimers.set(userId, timer);
     });
 });
 

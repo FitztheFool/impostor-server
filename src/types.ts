@@ -33,4 +33,5 @@ export interface Game {
     impostorGuessCorrect: boolean;
     surrenderUserId?: string;
     currentGameId: string | null;
+    disconnectTimers: Map<string, ReturnType<typeof setTimeout>>;
 }
