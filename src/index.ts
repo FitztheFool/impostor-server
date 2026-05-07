@@ -1,7 +1,7 @@
+import 'dotenv/config';
 import express from 'express';
 import http from 'http';
 import { Server } from 'socket.io';
-import dotenv from 'dotenv';
 import { setupSocketAuth, corsConfig, connectToLobby } from '@kwizar/shared';
 
 import type { Player } from './types';
@@ -11,8 +11,6 @@ import {
     startWritingPhase, startVoting, resolveVote,
     startSpeakerTurn, startImpostorGuess, endGame,
 } from './room';
-
-dotenv.config();
 
 // ─── HTTP ─────────────────────────────────────────────────────────────────────
 
@@ -31,6 +29,7 @@ const lobbySocket = connectToLobby('impostor-server', 'impostor');
 lobbySocket.on('impostor:configure', ({ lobbyId, players, options }: any, ack?: () => void) => {
         const totalRounds = Math.min(Math.max(parseInt(options?.rounds ?? '1', 10) || 1, 1), 5);
         const timePerRound = Math.min(Math.max(parseInt(options?.timePerRound ?? '60', 10) || 60, 30), 120);
+        const misterWhiteEnabled = options?.misterWhite === true;
 
         const existing = games.get(lobbyId);
         const gamePlayers: Player[] = players.map((p: any) => ({
@@ -45,8 +44,9 @@ lobbySocket.on('impostor:configure', ({ lobbyId, players, options }: any, ack?: 
             existing.expectedCount = players.length;
             existing.totalRounds = totalRounds;
             existing.timePerRound = timePerRound;
+            existing.misterWhiteEnabled = misterWhiteEnabled;
         } else {
-            const g = createGame(gamePlayers, totalRounds, timePerRound);
+            const g = createGame(gamePlayers, totalRounds, timePerRound, misterWhiteEnabled);
             g.expectedCount = players.length;
             games.set(lobbyId, g);
         }
@@ -96,10 +96,13 @@ io.on('connection', (socket) => {
 
         // Reconnection mid-game — resync state
         if (existing && g.started && g.roundState !== 'WAITING') {
-            const role = userId === g.impostorId ? 'impostor' : 'player';
+            const isMrWhite = userId === g.misterWhiteId;
+            const isImpostor = userId === g.impostorId;
+            const role = isImpostor ? 'impostor' : isMrWhite ? 'mister_white' : 'player';
             socket.emit('impostor:gameStart', {
                 role,
-                word: role === 'impostor' ? null : g.word,
+                word: isImpostor ? null : isMrWhite ? g.misterWhiteWord : g.word,
+                misterWhiteEnabled: !!g.misterWhiteId,
                 players: g.players.map(p => ({ id: p.id, name: p.name })),
                 totalRounds: g.totalRounds,
                 speakingOrder: g.speakingOrder,
@@ -136,6 +139,7 @@ io.on('connection', (socket) => {
                 socket.emit('impostor:votingPhase', {
                     players: g.players.map(p => ({ id: p.id, name: p.name })),
                     round: g.currentRound, timePerRound: g.timePerRound,
+                    misterWhiteEnabled: !!g.misterWhiteId,
                 });
             } else if (g.roundState === 'IMPOSTOR_GUESS') {
                 socket.emit('impostor:guessPhase', {
@@ -215,7 +219,7 @@ io.on('connection', (socket) => {
         }
     });
 
-    // ── Vote ──────────────────────────────────────────────────────────────────
+    // ── Vote impostor ─────────────────────────────────────────────────────────
     socket.on('impostor:vote', ({ lobbyId, targetId }) => {
         const { userId } = socket.data || {};
         const g = games.get(lobbyId);
@@ -228,7 +232,27 @@ io.on('connection', (socket) => {
             total: g.players.length,
         });
 
-        if (Object.keys(g.votes).length >= g.players.length) resolveVote(lobbyId);
+        const allVoted = Object.keys(g.votes).length >= g.players.length
+            && (!g.misterWhiteId || Object.keys(g.mrWhiteVotes).length >= g.players.length);
+        if (allVoted) resolveVote(lobbyId);
+    });
+
+    // ── Vote Mr White ─────────────────────────────────────────────────────────
+    socket.on('impostor:voteMrWhite', ({ lobbyId, targetId }) => {
+        const { userId } = socket.data || {};
+        const g = games.get(lobbyId);
+        if (!g || g.roundState !== 'VOTING' || !userId || !g.misterWhiteId) return;
+        if (!g.players.find(p => p.id === userId)) return;
+
+        g.mrWhiteVotes[userId] = targetId;
+        io.to(lobbyId).emit('impostor:mrWhiteVoteUpdate', {
+            mrWhiteVotedCount: Object.keys(g.mrWhiteVotes).length,
+            total: g.players.length,
+        });
+
+        const allVoted = Object.keys(g.votes).length >= g.players.length
+            && Object.keys(g.mrWhiteVotes).length >= g.players.length;
+        if (allVoted) resolveVote(lobbyId);
     });
 
     // ── Impostor guess ────────────────────────────────────────────────────────
