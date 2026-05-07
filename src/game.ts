@@ -8,7 +8,7 @@ export const games = new Map<string, Game>();
 
 // ─── Factory ──────────────────────────────────────────────────────────────────
 
-export function createGame(players: Player[], totalRounds: number, timePerRound: number): Game {
+export function createGame(players: Player[], totalRounds: number, timePerRound: number, misterWhiteEnabled = false): Game {
     const scores: Record<string, number> = {};
     for (const p of players) scores[p.id] = 0;
     return {
@@ -17,7 +17,13 @@ export function createGame(players: Player[], totalRounds: number, timePerRound:
         expectedCount: 0,
         started: false,
         word: null,
+        wordGroupId: null,
         impostorId: null,
+        misterWhiteEnabled,
+        misterWhiteId: null,
+        misterWhiteWord: null,
+        mrWhiteCaught: false,
+        mrWhiteVotes: {},
         roundState: 'WAITING',
         totalRounds,
         currentRound: 1,
@@ -38,14 +44,22 @@ export function createGame(players: Player[], totalRounds: number, timePerRound:
 
 // ─── Utils ────────────────────────────────────────────────────────────────────
 
-
-export async function fetchRandomWord(): Promise<string> {
+export async function fetchRandomWord(): Promise<{ word: string; groupId: string | null }> {
     const baseUrl = process.env.FRONTEND_URL ?? 'http://localhost:3000';
     const res = await fetch(`${baseUrl}/api/words`);
     if (!res.ok) throw new Error(`Failed to fetch words: ${res.status}`);
-    const cards: { words: string[] }[] = (await res.json()) as any;
+    const cards: { id?: string; words: string[] }[] = (await res.json()) as any;
     const card = cards[Math.floor(Math.random() * cards.length)];
-    return card.words[Math.floor(Math.random() * card.words.length)];
+    const word = card.words[Math.floor(Math.random() * card.words.length)];
+    return { word, groupId: card.id ?? null };
+}
+
+export async function fetchRelatedWord(groupId: string, exclude: string): Promise<string | null> {
+    const baseUrl = process.env.FRONTEND_URL ?? 'http://localhost:3000';
+    const res = await fetch(`${baseUrl}/api/words/related?groupId=${encodeURIComponent(groupId)}&exclude=${encodeURIComponent(exclude)}`);
+    if (!res.ok) return null;
+    const data = (await res.json()) as { word: string | null };
+    return data.word ?? null;
 }
 
 export async function saveAttempts(

@@ -17,7 +17,13 @@ export interface Game {
     expectedCount: number;
     started: boolean;
     word: string | null;
+    wordGroupId: string | null;
     impostorId: string | null;
+    misterWhiteEnabled: boolean;
+    misterWhiteId: string | null;
+    misterWhiteWord: string | null;
+    mrWhiteCaught: boolean;
+    mrWhiteVotes: Record<string, string>;
     roundState: 'WAITING' | 'WRITING' | 'REVEAL' | 'VOTING' | 'IMPOSTOR_GUESS' | 'END';
     totalRounds: number;
     currentRound: number;

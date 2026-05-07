@@ -98,9 +98,8 @@ io.on('connection', (socket) => {
         if (existing && g.started && g.roundState !== 'WAITING') {
             const isMrWhite = userId === g.misterWhiteId;
             const isImpostor = userId === g.impostorId;
-            const role = isImpostor ? 'impostor' : isMrWhite ? 'mister_white' : 'player';
             socket.emit('impostor:gameStart', {
-                role,
+                role: isImpostor ? 'impostor' : 'player',
                 word: isImpostor ? null : isMrWhite ? g.misterWhiteWord : g.word,
                 misterWhiteEnabled: !!g.misterWhiteId,
                 players: g.players.map(p => ({ id: p.id, name: p.name })),

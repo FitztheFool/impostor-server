@@ -1,6 +1,6 @@
 import { Server } from 'socket.io';
 import type { Clue, Player } from './types';
-import { games, fetchRandomWord, saveAttempts } from './game';
+import { games, fetchRandomWord, fetchRelatedWord, saveAttempts } from './game';
 import { shuffle } from '@kwizar/shared';
 
 let _io: Server;
@@ -20,10 +20,21 @@ export async function startGame(roomId: string) {
     if (!g) return;
     g.currentGameId = require('crypto').randomUUID();
 
-    const word = await fetchRandomWord();
+    const { word, groupId } = await fetchRandomWord();
     const impostorIndex = Math.floor(Math.random() * g.players.length);
     g.word = word;
+    g.wordGroupId = groupId;
     g.impostorId = g.players[impostorIndex].id;
+
+    // Assign Mr White (if enabled) — different player from impostor
+    if (g.misterWhiteEnabled && g.players.length >= 3 && groupId) {
+        const nonImpostors = g.players.filter(p => p.id !== g.impostorId);
+        const mrWhitePlayer = nonImpostors[Math.floor(Math.random() * nonImpostors.length)];
+        g.misterWhiteId = mrWhitePlayer.id;
+        g.misterWhiteWord = await fetchRelatedWord(groupId, word);
+        // Fallback: if group has no other word, disable Mr White for this game
+        if (!g.misterWhiteWord) g.misterWhiteId = null;
+    }
 
     // Speaking order — impostor never first
     const shuffled = shuffle(g.players.map(p => p.id));
@@ -33,13 +44,16 @@ export async function startGame(roomId: string) {
     }
     g.speakingOrder = shuffled;
 
-    console.log(`[IMPOSTOR] Room ${roomId} — mot: "${word}" — imposteur: ${g.impostorId}`);
+    console.log(`[IMPOSTOR] Room ${roomId} — mot: "${word}" — imposteur: ${g.impostorId}${g.misterWhiteId ? ` — Mr White: ${g.misterWhiteId} (${g.misterWhiteWord})` : ''}`);
 
     for (const p of g.players) {
         if (p.socketId) {
+            const isMrWhite = p.id === g.misterWhiteId;
+            const isImpostor = p.id === g.impostorId;
             _io.to(p.socketId).emit('impostor:gameStart', {
-                role: p.id === g.impostorId ? 'impostor' : 'player',
-                word: p.id === g.impostorId ? null : word,
+                role: isImpostor ? 'impostor' : 'player',
+                word: isImpostor ? null : isMrWhite ? g.misterWhiteWord : word,
+                misterWhiteEnabled: !!g.misterWhiteId,
                 players: g.players.map(p => ({ id: p.id, name: p.name })),
                 totalRounds: g.totalRounds,
                 speakingOrder: g.speakingOrder,
@@ -141,12 +155,14 @@ export function startVoting(roomId: string) {
     if (!g) return;
     g.roundState = 'VOTING';
     g.votes = {};
+    g.mrWhiteVotes = {};
 
     emitToRoom(roomId, 'impostor:votingPhase', {
         round: g.currentRound,
         totalRounds: g.totalRounds,
         players: g.players.map(p => ({ id: p.id, name: p.name })),
         timePerRound: g.timePerRound,
+        misterWhiteEnabled: !!g.misterWhiteId,
     });
 
     setTimeout(() => {
@@ -159,21 +175,34 @@ export function resolveVote(roomId: string) {
     const g = games.get(roomId);
     if (!g || g.roundState !== 'VOTING') return;
 
+    // Resolve impostor vote
     const count: Record<string, number> = {};
     for (const targetId of Object.values(g.votes)) {
         count[targetId] = (count[targetId] || 0) + 1;
     }
-
     let eliminatedId = g.players[0].id;
     let max = 0;
     for (const [id, votes] of Object.entries(count)) {
         if (votes > max) { max = votes; eliminatedId = id; }
     }
-
-    const eliminated = g.players.find(p => p.id === eliminatedId)!;
     const isImpostor = eliminatedId === g.impostorId;
     g.impostorCaught = isImpostor;
 
+    // Resolve Mr White vote
+    let mrWhiteEliminatedId: string | null = null;
+    const mrWhiteCount: Record<string, number> = {};
+    if (g.misterWhiteId) {
+        for (const targetId of Object.values(g.mrWhiteVotes)) {
+            mrWhiteCount[targetId] = (mrWhiteCount[targetId] || 0) + 1;
+        }
+        let mrWhiteMax = 0;
+        for (const [id, votes] of Object.entries(mrWhiteCount)) {
+            if (votes > mrWhiteMax) { mrWhiteMax = votes; mrWhiteEliminatedId = id; }
+        }
+        g.mrWhiteCaught = mrWhiteEliminatedId === g.misterWhiteId;
+    }
+
+    // Scoring
     if (isImpostor) {
         for (const p of g.players) {
             if (p.id === g.impostorId) continue;
@@ -187,12 +216,31 @@ export function resolveVote(roomId: string) {
             if (g.votes[p.id] === g.impostorId) g.scores[p.id] = (g.scores[p.id] || 0) + 1;
         }
     }
+    if (g.misterWhiteId) {
+        if (g.mrWhiteCaught) {
+            // Players who correctly identified Mr White get +1
+            for (const p of g.players) {
+                if (p.id === g.impostorId || p.id === g.misterWhiteId) continue;
+                if (g.mrWhiteVotes[p.id] === g.misterWhiteId) g.scores[p.id] = (g.scores[p.id] || 0) + 1;
+            }
+        } else {
+            // Mr White successfully blended in: +2
+            g.scores[g.misterWhiteId] = (g.scores[g.misterWhiteId] || 0) + 2;
+        }
+    }
+
+    const eliminated = g.players.find(p => p.id === eliminatedId)!;
+    const mrWhiteEliminated = mrWhiteEliminatedId ? g.players.find(p => p.id === mrWhiteEliminatedId) : null;
 
     emitToRoom(roomId, 'impostor:eliminated', {
         eliminatedId,
         eliminatedName: eliminated.name,
         isImpostor,
         votes: count,
+        mrWhiteEliminatedId,
+        mrWhiteEliminatedName: mrWhiteEliminated?.name ?? null,
+        mrWhiteCaught: g.mrWhiteCaught,
+        mrWhiteVotes: mrWhiteCount,
     });
 
     startImpostorGuess(roomId);
@@ -226,6 +274,7 @@ export function endGame(roomId: string) {
 
     const winner: 'players' | 'impostor' = (g.impostorCaught && !g.impostorGuessCorrect) ? 'players' : 'impostor';
     const impostor = g.players.find(p => p.id === g.impostorId);
+    const mrWhite = g.misterWhiteId ? g.players.find(p => p.id === g.misterWhiteId) : null;
 
     emitToRoom(roomId, 'impostor:finished', {
         winner,
@@ -238,6 +287,11 @@ export function endGame(roomId: string) {
         impostorGuess: g.impostorGuess,
         impostorGuessCorrect: g.impostorGuessCorrect,
         impostorCaught: g.impostorCaught,
+        misterWhiteEnabled: g.misterWhiteEnabled,
+        misterWhiteId: g.misterWhiteId,
+        misterWhiteName: mrWhite?.name ?? null,
+        misterWhiteWord: g.misterWhiteWord,
+        mrWhiteCaught: g.mrWhiteCaught,
     });
 
     const sorted = [...g.players].sort((a, b) => (g.scores[b.id] ?? 0) - (g.scores[a.id] ?? 0));
