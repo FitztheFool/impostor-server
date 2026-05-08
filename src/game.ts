@@ -1,6 +1,5 @@
 import { randomUUID } from 'crypto';
 import type { Game, Player } from './types';
-import { shuffle } from '@kwizar/shared';
 
 // ─── State ────────────────────────────────────────────────────────────────────
 
