@@ -22,43 +22,43 @@ const io = new Server(server, { cors: corsConfig, maxHttpBufferSize: 1e5 });
 
 initRoom(io);
 
-setupSocketAuth(io, new TextEncoder().encode(process.env.INTERNAL_API_KEY!));
+setupSocketAuth(io, new TextEncoder().encode((process.env.SOCKET_USER_SECRET ?? process.env.INTERNAL_API_KEY)!));
 
 const lobbySocket = connectToLobby('impostor-server', 'impostor');
 
 lobbySocket.on('impostor:configure', ({ lobbyId, players, options }: any, ack?: () => void) => {
-        const totalRounds = Math.min(Math.max(parseInt(options?.rounds ?? '1', 10) || 1, 1), 5);
-        const timePerRound = Math.min(Math.max(parseInt(options?.timePerRound ?? '60', 10) || 60, 30), 120);
-        const misterWhiteEnabled = options?.misterWhite === true;
+    const totalRounds = Math.min(Math.max(parseInt(options?.rounds ?? '1', 10) || 1, 1), 5);
+    const timePerRound = Math.min(Math.max(parseInt(options?.timePerRound ?? '60', 10) || 60, 30), 120);
+    const misterWhiteEnabled = options?.misterWhite === true;
 
-        const existing = games.get(lobbyId);
-        const gamePlayers: Player[] = players.map((p: any) => ({
-            id: p.userId,
-            name: p.username,
-            socketId: existing?.players.find((ep: Player) => ep.id === p.userId)?.socketId ?? null,
-            eliminated: false,
-        }));
+    const existing = games.get(lobbyId);
+    const gamePlayers: Player[] = players.map((p: any) => ({
+        id: p.userId,
+        name: p.username,
+        socketId: existing?.players.find((ep: Player) => ep.id === p.userId)?.socketId ?? null,
+        eliminated: false,
+    }));
 
-        if (existing) {
-            existing.players = gamePlayers;
-            existing.expectedCount = players.length;
-            existing.totalRounds = totalRounds;
-            existing.timePerRound = timePerRound;
-            existing.misterWhiteEnabled = misterWhiteEnabled;
-        } else {
-            const g = createGame(gamePlayers, totalRounds, timePerRound, misterWhiteEnabled);
-            g.expectedCount = players.length;
-            games.set(lobbyId, g);
-        }
+    if (existing) {
+        existing.players = gamePlayers;
+        existing.expectedCount = players.length;
+        existing.totalRounds = totalRounds;
+        existing.timePerRound = timePerRound;
+        existing.misterWhiteEnabled = misterWhiteEnabled;
+    } else {
+        const g = createGame(gamePlayers, totalRounds, timePerRound, misterWhiteEnabled);
+        g.expectedCount = players.length;
+        games.set(lobbyId, g);
+    }
 
-        const g = games.get(lobbyId)!;
-        const connected = g.players.filter((p: Player) => p.socketId !== null).length;
-        if (!g.started && g.expectedCount > 0 && connected >= g.expectedCount) {
-            g.started = true;
-            setTimeout(() => startGame(lobbyId), 500);
-        }
+    const g = games.get(lobbyId)!;
+    const connected = g.players.filter((p: Player) => p.socketId !== null).length;
+    if (!g.started && g.expectedCount > 0 && connected >= g.expectedCount) {
+        g.started = true;
+        setTimeout(() => startGame(lobbyId), 500);
+    }
 
-        if (typeof ack === 'function') ack();
+    if (typeof ack === 'function') ack();
 });
 
 // ─── Socket handlers ──────────────────────────────────────────────────────────
@@ -327,6 +327,12 @@ io.on('connection', (socket) => {
 const PORT = process.env.PORT || 10010;
 server.listen(PORT, () => console.log('[IMPOSTOR] realtime listening on', PORT));
 
-const shutdown = () => server.close(() => process.exit(0));
-process.on('SIGTERM', shutdown);
-process.on('SIGINT', shutdown);
+const shutdown = () => {
+    io.close(() => {
+        server.close(() => process.exit(0));
+    });
+    setTimeout(() => process.exit(1), 3000).unref();
+};
+
+process.on("SIGTERM", shutdown);
+process.on("SIGINT", shutdown);
