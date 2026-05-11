@@ -69,8 +69,6 @@ io.on('connection', (socket) => {
     socket.on('impostor:join', ({ lobbyId, playerName }) => {
         const { userId } = socket.data;
         if (!lobbyId || !userId) return;
-        socket.join(lobbyId);
-        socket.data.lobbyId = lobbyId;
 
         if (!games.has(lobbyId)) { socket.emit('notFound'); return; }
 
@@ -88,7 +86,15 @@ io.on('connection', (socket) => {
         } else if (!g.started) {
             g.players.push({ id: userId, name: playerName, socketId: socket.id, eliminated: false });
             g.scores[userId] = 0;
+        } else {
+            // Pas un joueur attendu et partie démarrée : refuser pour empêcher
+            // l'écoute des broadcasts (mot, identité impostor, etc.).
+            socket.emit('impostor:accessDenied');
+            return;
         }
+
+        socket.join(lobbyId);
+        socket.data.lobbyId = lobbyId;
 
         io.to(lobbyId).emit('impostor:players', {
             players: g.players.map(p => ({ id: p.id, name: p.name })),
