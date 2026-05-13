@@ -230,6 +230,7 @@ io.on('connection', (socket) => {
         const g = games.get(lobbyId);
         if (!g || g.roundState !== 'VOTING' || !userId) return;
         if (!g.players.find(p => p.id === userId)) return;
+        if (typeof targetId !== 'string' || !g.players.find(p => p.id === targetId)) return;
 
         g.votes[userId] = targetId;
         io.to(lobbyId).emit('impostor:voteUpdate', {
@@ -248,6 +249,7 @@ io.on('connection', (socket) => {
         const g = games.get(lobbyId);
         if (!g || g.roundState !== 'VOTING' || !userId || !g.misterWhiteId) return;
         if (!g.players.find(p => p.id === userId)) return;
+        if (typeof targetId !== 'string' || !g.players.find(p => p.id === targetId)) return;
 
         g.mrWhiteVotes[userId] = targetId;
         io.to(lobbyId).emit('impostor:mrWhiteVoteUpdate', {
@@ -280,9 +282,12 @@ io.on('connection', (socket) => {
     // ── Surrender ─────────────────────────────────────────────────────────────
     socket.on('impostor:surrender', () => {
         const { lobbyId, userId } = socket.data || {};
-        if (!lobbyId) return;
+        if (!lobbyId || !userId) return;
         const g = games.get(lobbyId);
-        if (g) g.surrenderUserId = userId;
+        if (!g) return;
+        // Seul un joueur réellement présent peut abandonner la partie.
+        if (!g.players.find(p => p.id === userId)) return;
+        g.surrenderUserId = userId;
         endGame(lobbyId);
     });
 
