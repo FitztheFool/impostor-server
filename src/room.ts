@@ -294,13 +294,18 @@ export function endGame(roomId: string) {
         mrWhiteCaught: g.mrWhiteCaught,
     });
 
-    const sorted = [...g.players].sort((a, b) => (g.scores[b.id] ?? 0) - (g.scores[a.id] ?? 0));
-    saveAttempts('IMPOSTOR', g.currentGameId ?? roomId, sorted.map((p, i) => ({
-        userId: p.id,
-        score: g.scores[p.id] ?? 0,
-        placement: i + 1,
-        abandon: g.surrenderUserId === p.id,
-    })));
+    const isAbandon = (id: string) => g.surrenderUserId === id;
+    const finishers = g.players.filter(p => !isAbandon(p.id));
+    const sortedFinishers = [...finishers].sort((a, b) => (g.scores[b.id] ?? 0) - (g.scores[a.id] ?? 0));
+    saveAttempts('IMPOSTOR', g.currentGameId ?? roomId, g.players.map(p => {
+        const abandon = isAbandon(p.id);
+        return {
+            userId: p.id,
+            score: g.scores[p.id] ?? 0,
+            placement: abandon ? null : sortedFinishers.findIndex(x => x.id === p.id) + 1,
+            abandon,
+        };
+    }));
 
     games.delete(roomId);
 }

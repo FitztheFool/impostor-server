@@ -64,7 +64,7 @@ export async function fetchRelatedWord(groupId: string, exclude: string): Promis
 export async function saveAttempts(
     gameType: string,
     gameId: string,
-    scores: { userId: string; score: number; placement?: number; abandon?: boolean }[],
+    scores: { userId: string; score: number; placement?: number | null; abandon?: boolean }[],
 ) {
     const frontendUrl = process.env.FRONTEND_URL;
     const secret = process.env.INTERNAL_API_KEY;
