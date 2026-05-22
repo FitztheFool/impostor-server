@@ -26,7 +26,7 @@ setupSocketAuth(io, new TextEncoder().encode((process.env.SOCKET_USER_SECRET ?? 
 
 const lobbySocket = connectToLobby('impostor-server', 'impostor');
 
-lobbySocket.on('impostor:configure', ({ lobbyId, players, options }: any, ack?: () => void) => {
+lobbySocket.on('impostor:configure', ({ lobbyId, players, options, fresh }: any, ack?: () => void) => {
     const totalRounds = Math.min(Math.max(parseInt(options?.rounds ?? '1', 10) || 1, 1), 5);
     const timePerRound = Math.min(Math.max(parseInt(options?.timePerRound ?? '60', 10) || 60, 30), 120);
     const misterWhiteEnabled = options?.misterWhite === true;
@@ -39,7 +39,7 @@ lobbySocket.on('impostor:configure', ({ lobbyId, players, options }: any, ack?: 
         eliminated: false,
     }));
 
-    if (existing) {
+    if (existing && !fresh) {
         existing.players = gamePlayers;
         existing.expectedCount = players.length;
         existing.totalRounds = totalRounds;
