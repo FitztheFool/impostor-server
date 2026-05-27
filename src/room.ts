@@ -2,6 +2,7 @@ import { Server } from 'socket.io';
 import type { Clue, Player } from './types';
 import { games, fetchRandomWord, fetchRelatedWord, saveAttempts } from './game';
 import { shuffle } from '@kwizar/shared';
+import { pushLog, type LogTone } from './gameLog';
 
 let _io: Server;
 
@@ -11,6 +12,14 @@ export function initRoom(io: Server) {
 
 function emitToRoom(roomId: string, event: string, data: any) {
     _io.to(roomId).emit(event, data);
+}
+
+/** Push a journal entry and broadcast the updated log to the room. */
+export function logEvent(roomId: string, tone: LogTone, text: string) {
+    const g = games.get(roomId);
+    if (!g) return;
+    pushLog(g, tone, text);
+    _io.to(roomId).emit('impostor:log', { log: g.log.slice(-100) });
 }
 
 // ─── Game start ───────────────────────────────────────────────────────────────
@@ -61,6 +70,7 @@ export async function startGame(roomId: string) {
         }
     }
 
+    logEvent(roomId, 'system', `La partie commence — ${g.players.length} joueurs, démasquez l'imposteur`);
     startWritingPhase(roomId);
 }
 
@@ -83,6 +93,7 @@ export function startWritingPhase(roomId: string) {
         timePerRound: g.timePerRound,
     });
 
+    logEvent(roomId, 'turn', `Manche ${g.currentRound}/${g.totalRounds} — phase d'indices`);
     startSpeakerTurn(roomId);
 }
 
@@ -243,6 +254,13 @@ export function resolveVote(roomId: string) {
         mrWhiteVotes: mrWhiteCount,
     });
 
+    logEvent(roomId, isImpostor ? 'coup' : 'attack',
+        `${eliminated.name} est éliminé — ${isImpostor ? "c'était l'imposteur !" : "innocent !"}`);
+    if (mrWhiteEliminated) {
+        logEvent(roomId, g.mrWhiteCaught ? 'coup' : 'system',
+            `${mrWhiteEliminated.name} accusé d'être Mr White — ${g.mrWhiteCaught ? 'démasqué !' : 'à tort'}`);
+    }
+
     startImpostorGuess(roomId);
 }
 
@@ -275,6 +293,8 @@ export function endGame(roomId: string) {
     const winner: 'players' | 'impostor' = (g.impostorCaught && !g.impostorGuessCorrect) ? 'players' : 'impostor';
     const impostor = g.players.find(p => p.id === g.impostorId);
     const mrWhite = g.misterWhiteId ? g.players.find(p => p.id === g.misterWhiteId) : null;
+
+    logEvent(roomId, 'coup', `${winner === 'players' ? 'Les joueurs gagnent' : "L'imposteur gagne"} ! Imposteur : ${impostor?.name ?? '?'}, mot : « ${g.word ?? '?'} »`);
 
     emitToRoom(roomId, 'impostor:finished', {
         winner,

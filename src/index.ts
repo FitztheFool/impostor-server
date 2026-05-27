@@ -9,7 +9,7 @@ import { games, createGame } from './game';
 import {
     initRoom, startGame,
     startWritingPhase, startVoting, resolveVote,
-    startSpeakerTurn, startImpostorGuess, endGame,
+    startSpeakerTurn, startImpostorGuess, endGame, logEvent,
 } from './room';
 
 // ─── HTTP ─────────────────────────────────────────────────────────────────────
@@ -99,6 +99,8 @@ io.on('connection', (socket) => {
         io.to(lobbyId).emit('impostor:players', {
             players: g.players.map(p => ({ id: p.id, name: p.name })),
         });
+
+        socket.emit('impostor:log', { log: g.log.slice(-100) });
 
         // Reconnection mid-game — resync state
         if (existing && g.started && g.roundState !== 'WAITING') {
@@ -190,6 +192,8 @@ io.on('connection', (socket) => {
             submittedCount: g.cluesThisRound.length,
             total: g.speakingOrder.length,
         });
+
+        logEvent(lobbyId, 'move', `${player?.name ?? '?'} : « ${safeText} »`);
 
         g.currentSpeakerIndex++;
         startSpeakerTurn(lobbyId);
@@ -286,8 +290,10 @@ io.on('connection', (socket) => {
         const g = games.get(lobbyId);
         if (!g) return;
         // Seul un joueur réellement présent peut abandonner la partie.
-        if (!g.players.find(p => p.id === userId)) return;
+        const sp = g.players.find(p => p.id === userId);
+        if (!sp) return;
         g.surrenderUserId = userId;
+        logEvent(lobbyId, 'system', `${sp.name} abandonne la partie`);
         endGame(lobbyId);
     });
 

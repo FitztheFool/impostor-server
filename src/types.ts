@@ -1,3 +1,5 @@
+import type { GameLogEntry } from './gameLog';
+
 export interface Player {
     id: string;
     name: string;
@@ -40,4 +42,6 @@ export interface Game {
     surrenderUserId?: string;
     currentGameId: string | null;
     disconnectTimers: Map<string, ReturnType<typeof setTimeout>>;
+    log: GameLogEntry[];
+    logSeq?: number;
 }
