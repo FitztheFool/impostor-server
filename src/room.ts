@@ -290,7 +290,14 @@ export function endGame(roomId: string) {
     if (!g) return;
     g.roundState = 'END';
 
-    const winner: 'players' | 'impostor' = (g.impostorCaught && !g.impostorGuessCorrect) ? 'players' : 'impostor';
+    // An abandon makes the quitter's side lose: the impostor leaving hands the
+    // win to the players; any other player leaving hands it to the impostor.
+    let winner: 'players' | 'impostor';
+    if (g.surrenderUserId) {
+        winner = g.surrenderUserId === g.impostorId ? 'players' : 'impostor';
+    } else {
+        winner = (g.impostorCaught && !g.impostorGuessCorrect) ? 'players' : 'impostor';
+    }
     const impostor = g.players.find(p => p.id === g.impostorId);
     const mrWhite = g.misterWhiteId ? g.players.find(p => p.id === g.misterWhiteId) : null;
 
