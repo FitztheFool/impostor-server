@@ -78,8 +78,8 @@ export async function saveAttempts(
             body: JSON.stringify({ gameType, gameId, scores }),
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        console.log(`[${gameType}] scores saved for ${gameId}`);
+        console.log(`[${gameType.toUpperCase()}] scores saved for ${gameId}`);
     } catch (err) {
-        console.error(`[${gameType}] saveAttempts error:`, err);
+        console.error(`[${gameType.toUpperCase()}] saveAttempts error:`, err);
     }
 }

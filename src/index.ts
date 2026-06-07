@@ -342,7 +342,7 @@ io.on('connection', (socket) => {
 // ─── Start ────────────────────────────────────────────────────────────────────
 
 const PORT = process.env.PORT || 10010;
-server.listen(PORT, () => console.log('[IMPOSTOR] realtime listening on', PORT));
+server.listen(PORT, () => console.log('[IMPOSTOR] listening on port', PORT));
 
 const shutdown = () => {
     io.close(() => {
