@@ -63,14 +63,21 @@ export async function fetchRelatedWord(groupId: string, exclude: string): Promis
     return data.word ?? null;
 }
 
+export interface EloResult {
+    userId: string;
+    before: number;
+    after: number;
+    delta: number;
+}
+
 export async function saveAttempts(
     gameType: string,
     gameId: string,
     scores: { userId: string; score: number; placement?: number | null; abandon?: boolean }[],
-) {
+): Promise<EloResult[]> {
     const frontendUrl = process.env.FRONTEND_URL;
     const secret = process.env.INTERNAL_API_KEY;
-    if (!frontendUrl || !secret) return;
+    if (!frontendUrl || !secret) return [];
     try {
         const res = await fetch(`${frontendUrl}/api/attempts`, {
             method: 'POST',
@@ -79,7 +86,10 @@ export async function saveAttempts(
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         console.log(`[${gameType.toUpperCase()}] scores saved for ${gameId}`);
+        const data = (await res.json().catch(() => null)) as { elo?: EloResult[] } | null;
+        return Array.isArray(data?.elo) ? data.elo : [];
     } catch (err) {
         console.error(`[${gameType.toUpperCase()}] saveAttempts error:`, err);
+        return [];
     }
 }

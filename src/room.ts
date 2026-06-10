@@ -332,7 +332,7 @@ export function endGame(roomId: string) {
             placement: abandon ? null : sortedFinishers.findIndex(x => x.id === p.id) + 1,
             abandon,
         };
-    }));
+    })).then(elo => { if (elo.length) emitToRoom(roomId, 'elo:update', { gameType: 'IMPOSTOR', elo }); });
 
     games.delete(roomId);
 }
