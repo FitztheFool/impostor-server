@@ -87,14 +87,14 @@ io.on('connection', (socket) => {
             g.players.push({ id: userId, name: playerName, socketId: socket.id, eliminated: false });
             g.scores[userId] = 0;
         } else {
-            // Pas un joueur attendu et partie démarrée : refuser pour empêcher
-            // l'écoute des broadcasts (mot, identité impostor, etc.).
-            socket.emit('impostor:accessDenied');
-            return;
+            // Partie démarrée et user inconnu : spectateur (vue publique seulement).
+            socket.data.spectator = true;
         }
+        const isSpectator = !!socket.data.spectator;
 
         socket.join(lobbyId);
         socket.data.lobbyId = lobbyId;
+        if (isSpectator) socket.emit('impostor:spectator', { spectator: true });
 
         io.to(lobbyId).emit('impostor:players', {
             players: g.players.map(p => ({ id: p.id, name: p.name })),
@@ -102,13 +102,13 @@ io.on('connection', (socket) => {
 
         socket.emit('impostor:log', { log: g.log.slice(-100) });
 
-        // Reconnection mid-game — resync state
-        if (existing && g.started && g.roundState !== 'WAITING') {
-            const isMrWhite = userId === g.misterWhiteId;
-            const isImpostor = userId === g.impostorId;
+        // Reconnection / spectateur mid-game — resync state
+        if ((existing || isSpectator) && g.started && g.roundState !== 'WAITING') {
+            const isMrWhite = !isSpectator && userId === g.misterWhiteId;
+            const isImpostor = !isSpectator && userId === g.impostorId;
             socket.emit('impostor:gameStart', {
-                role: isImpostor ? 'impostor' : 'player',
-                word: isImpostor ? null : isMrWhite ? g.misterWhiteWord : g.word,
+                role: isSpectator ? 'spectator' : isImpostor ? 'impostor' : 'player',
+                word: (isSpectator || isImpostor) ? null : isMrWhite ? g.misterWhiteWord : g.word,
                 misterWhiteEnabled: !!g.misterWhiteId,
                 players: g.players.map(p => ({ id: p.id, name: p.name })),
                 totalRounds: g.totalRounds,

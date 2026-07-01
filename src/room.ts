@@ -1,7 +1,7 @@
 import { Server } from 'socket.io';
 import type { Clue, Player } from './types';
 import { games, fetchRandomWord, fetchRelatedWord, saveAttempts } from './game';
-import { shuffle } from '@kwizar/shared';
+import { shuffle, emitToSpectators } from '@kwizar/shared';
 import { pushLog, type LogTone } from './gameLog';
 
 let _io: Server;
@@ -69,6 +69,13 @@ export async function startGame(roomId: string) {
             });
         }
     }
+
+    // Spectateurs : vue PUBLIQUE seulement (ni mot, ni identité de l'imposteur).
+    emitToSpectators(_io, roomId, uid => g.players.some(p => p.id === uid), 'impostor:gameStart', {
+        role: 'spectator', word: null, misterWhiteEnabled: !!g.misterWhiteId,
+        players: g.players.map(p => ({ id: p.id, name: p.name })),
+        totalRounds: g.totalRounds, speakingOrder: g.speakingOrder,
+    });
 
     logEvent(roomId, 'system', `La partie commence — ${g.players.length} joueurs, démasquez l'imposteur`);
     startWritingPhase(roomId);
