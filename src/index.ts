@@ -1,8 +1,5 @@
 import 'dotenv/config';
-import express from 'express';
-import http from 'http';
-import { Server } from 'socket.io';
-import { setupSocketAuth, corsConfig, connectToLobby } from '@kwizar/shared';
+import { createGameServer } from '@kwizar/shared';
 
 import type { Player } from './types';
 import { games, createGame } from './game';
@@ -14,17 +11,12 @@ import {
 
 // ─── HTTP ─────────────────────────────────────────────────────────────────────
 
-const app = express();
-app.get('/health', (_req, res) => { res.set('Access-Control-Allow-Origin', '*'); res.status(200).send('ok'); });
 
-const server = http.createServer(app);
-const io = new Server(server, { cors: corsConfig, maxHttpBufferSize: 1e5 });
+const { io, lobbySocket, listen } = createGameServer({ serviceName: 'impostor-server', gameType: 'impostor', defaultPort: 10010 });
 
 initRoom(io);
 
-setupSocketAuth(io, new TextEncoder().encode((process.env.SOCKET_USER_SECRET ?? process.env.INTERNAL_API_KEY)!));
 
-const lobbySocket = connectToLobby('impostor-server', 'impostor');
 
 lobbySocket.on('impostor:configure', ({ lobbyId, players, options, fresh }: any, ack?: () => void) => {
     const totalRounds = Math.min(Math.max(parseInt(options?.rounds ?? '1', 10) || 1, 1), 5);
@@ -341,15 +333,5 @@ io.on('connection', (socket) => {
 
 // ─── Start ────────────────────────────────────────────────────────────────────
 
-const PORT = process.env.PORT || 10010;
-server.listen(PORT, () => console.log('[IMPOSTOR] listening on port', PORT));
+listen();
 
-const shutdown = () => {
-    io.close(() => {
-        server.close(() => process.exit(0));
-    });
-    setTimeout(() => process.exit(1), 3000).unref();
-};
-
-process.on("SIGTERM", shutdown);
-process.on("SIGINT", shutdown);

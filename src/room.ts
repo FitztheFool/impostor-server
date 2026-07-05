@@ -2,7 +2,7 @@ import { Server } from 'socket.io';
 import type { Clue, Player } from './types';
 import { games, fetchRandomWord, fetchRelatedWord, saveAttempts } from './game';
 import { shuffle, emitToSpectators } from '@kwizar/shared';
-import { pushLog, type LogTone } from './gameLog';
+import { pushLog, type LogTone } from '@kwizar/shared';
 
 let _io: Server;
 
